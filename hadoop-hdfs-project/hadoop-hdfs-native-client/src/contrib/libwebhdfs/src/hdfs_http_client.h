@@ -98,6 +98,11 @@ struct Response {
     struct ResponseBuffer *header;
 };
 
+struct RequestHeaders{
+	char **headers;
+	size_t length;
+};
+
 /**
  * Create and initialize a ResponseBuffer
  *
@@ -120,6 +125,8 @@ void freeResponseBuffer(struct ResponseBuffer *buffer);
  */
 void freeResponse(struct Response *resp);
 
+void freeRequestHeaders(struct RequestHeaders *headers);
+
 /**
  * Send the MKDIR request to NameNode using the given URL. 
  * The NameNode will execute the operation and return the result as response.
@@ -128,7 +135,7 @@ void freeResponse(struct Response *resp);
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchMKDIR(const char *url,
+int launchMKDIR(const char *url, struct RequestHeaders *headers,
                 struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -139,7 +146,7 @@ int launchMKDIR(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchRENAME(const char *url,
+int launchRENAME(const char *url, struct RequestHeaders *headers,
                  struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -150,7 +157,7 @@ int launchRENAME(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchCHMOD(const char *url,
+int launchCHMOD(const char *url, struct RequestHeaders *headers,
                 struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -162,7 +169,7 @@ int launchCHMOD(const char *url,
  *                 containing either file status or exception information
  * @return 0 for success, non-zero value to indicate error
  */
-int launchGFS(const char *url,
+int launchGFS(const char *url, struct RequestHeaders *headers,
               struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -173,7 +180,7 @@ int launchGFS(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchLS(const char *url,
+int launchLS(const char *url, struct RequestHeaders *headers,
              struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -184,7 +191,7 @@ int launchLS(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchDELETE(const char *url,
+int launchDELETE(const char *url, struct RequestHeaders *headers,
                  struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -195,7 +202,7 @@ int launchDELETE(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchCHOWN(const char *url,
+int launchCHOWN(const char *url, struct RequestHeaders *headers,
                 struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -210,7 +217,7 @@ int launchCHOWN(const char *url,
                The file content will be written into the buffer.
  * @return 0 for success, non-zero value to indicate error
  */
-int launchOPEN(const char *url,
+int launchOPEN(const char *url, struct RequestHeaders *headers,
                struct Response* resp) __attribute__ ((warn_unused_result));
 
 /**
@@ -221,7 +228,7 @@ int launchOPEN(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchUTIMES(const char *url,
+int launchUTIMES(const char *url, struct RequestHeaders *headers,
                  struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -233,7 +240,7 @@ int launchUTIMES(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchNnWRITE(const char *url,
+int launchNnWRITE(const char *url, struct RequestHeaders *headers,
                   struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -246,7 +253,7 @@ int launchNnWRITE(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchDnWRITE(const char *url, struct webhdfsBuffer *buffer,
+int launchDnWRITE(const char *url, struct RequestHeaders *headers, struct webhdfsBuffer *buffer,
                   struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -258,7 +265,7 @@ int launchDnWRITE(const char *url, struct webhdfsBuffer *buffer,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchNnAPPEND(const char *url, struct Response **response) __attribute__ ((warn_unused_result));
+int launchNnAPPEND(const char *url, struct RequestHeaders* headers, struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
  * Send the SETREPLICATION request to NameNode using the given URL.
@@ -268,7 +275,7 @@ int launchNnAPPEND(const char *url, struct Response **response) __attribute__ ((
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchSETREPLICATION(const char *url,
+int launchSETREPLICATION(const char *url, struct RequestHeaders *headers,
                          struct Response **response) __attribute__ ((warn_unused_result));
 
 /**
@@ -280,9 +287,19 @@ int launchSETREPLICATION(const char *url,
  * @param response Response handle to store response returned from the NameNode
  * @return 0 for success, non-zero value to indicate error
  */
-int launchDnAPPEND(const char *url, struct webhdfsBuffer *buffer,
+int launchDnAPPEND(const char *url, struct RequestHeaders *headers, struct webhdfsBuffer *buffer,
                    struct Response **response) __attribute__ ((warn_unused_result));
 
+/**
+ * Send the OAuth request to the refresh OAuthtoken.
+ *
+ * @param url The URL for Refresh OAuth token operation
+ * @param buffer The webhdfsBuffer containing data to be appended
+ * @param response Response handle to store response returned from the NameNode
+ * @return 0 for success, non-zero value to indicate error
+ */
+int launchUpdateOAuth(const char* url, struct RequestHeaders *headers, struct webhdfsBuffer *buffer,
+					  struct Response **response) __attribute__ ((warn_unused_result));
 /**
  * Thread-safe strerror alternative.
  *

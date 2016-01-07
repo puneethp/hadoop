@@ -199,18 +199,22 @@ static void initCurlGlobal()
  *
  * @param url       Target URL
  * @param method    HTTP method (GET/PUT/POST)
+ * @param headers	HTTP headers that must be added
  * @param followloc Whether or not need to set CURLOPT_FOLLOWLOCATION
  * @param response  Response from remote service
  * @return 0 for success and non-zero value to indicate error
  */
 static int launchCmd(const char *url, enum HttpHeader method,
-                     enum Redirect followloc, struct Response **response)
+					 struct RequestHeaders *headers, enum Redirect followloc,
+                     struct Response **response)
 {
     CURL *curl = NULL;
     CURLcode curlCode;
     int ret = 0;
     struct Response *resp = NULL;
-    
+    struct curl_slist *req_headers = NULL;
+	int i = 0;
+
     resp = calloc(1, sizeof(struct Response));
     if (!resp) {
         return ENOMEM;
@@ -257,8 +261,19 @@ static int launchCmd(const char *url, enum HttpHeader method,
     if (followloc == YES) {
         curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
     }
+ 	/* Set custom headers */
+	if(headers){
+		for(i=0; i<headers->length; i++){
+			req_headers = curl_slist_append(req_headers,headers->headers[i]);
+		}
+		curl_easy_setopt(curl,CURLOPT_HTTPHEADER,req_headers);
+	}
     /* Now run the curl handler */
     curlCode = curl_easy_perform(curl);
+	/* Deallocate the headers list if created */
+	if(headers){
+		curl_slist_free_all(req_headers);
+	}
     if (curlCode != CURLE_OK) {
         ret = EIO;
         fprintf(stderr, "ERROR: preform the URL %s failed, <%d>: %s\n",
@@ -284,11 +299,13 @@ done:
  * @param resp  The response containing the buffer provided by user
  * @return 0 for success and non-zero value to indicate error
  */
-static int launchReadInternal(const char *url, struct Response* resp)
+static int launchReadInternal(const char *url, struct RequestHeaders *headers, struct Response* resp)
 {
     CURL *curl;
     CURLcode curlCode;
     int ret = 0;
+    struct curl_slist *req_headers = NULL;
+	int i = 0;
     
     if (!resp || !resp->body || !resp->body->content) {
         fprintf(stderr,
@@ -310,7 +327,19 @@ static int launchReadInternal(const char *url, struct Response* resp)
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1);
     
+  	/* Set custom headers */
+	if(headers){
+		for(i=0; i<headers->length; i++){
+			req_headers = curl_slist_append(req_headers,headers->headers[i]);
+		}
+		curl_easy_setopt(curl,CURLOPT_HTTPHEADER,req_headers);
+	}
+   
     curlCode = curl_easy_perform(curl);
+ 	/* Deallocate the headers list if created */
+	if(headers){
+		curl_slist_free_all(req_headers);
+	}
     if (curlCode != CURLE_OK && curlCode != CURLE_PARTIAL_FILE) {
         ret = EIO;
         fprintf(stderr, "ERROR: preform the URL %s failed, <%d>: %s\n",
@@ -334,14 +363,15 @@ static int launchReadInternal(const char *url, struct Response* resp)
  * @return 0 for success and non-zero value to indicate error
  */
 static int launchWrite(const char *url, enum HttpHeader method,
-                       struct webhdfsBuffer *uploadBuffer,
+                       struct RequestHeaders *headers, struct webhdfsBuffer *uploadBuffer,
                        struct Response **response)
 {
     CURLcode curlCode;
     struct Response* resp = NULL;
-    struct curl_slist *chunk = NULL;
     CURL *curl = NULL;
     int ret = 0;
+    struct curl_slist *req_headers = NULL;
+	int i = 0;
     
     if (!uploadBuffer) {
         fprintf(stderr, "ERROR: upload buffer is NULL!\n");
@@ -378,11 +408,6 @@ static int launchWrite(const char *url, enum HttpHeader method,
     curl_easy_setopt(curl, CURLOPT_READDATA, uploadBuffer);
     curl_easy_setopt(curl, CURLOPT_UPLOAD, 1L);
     
-    chunk = curl_slist_append(chunk, "Transfer-Encoding: chunked");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
-    chunk = curl_slist_append(chunk, "Expect:");
-    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
-    
     switch(method) {
         case PUT:
             curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
@@ -395,17 +420,24 @@ static int launchWrite(const char *url, enum HttpHeader method,
             fprintf(stderr, "ERROR: Invalid HTTP method\n");
             goto done;
     }
+ 	/* Set custom headers */
+	if(headers){
+		for(i=0; i<headers->length; i++){
+			req_headers = curl_slist_append(req_headers,headers->headers[i]);
+		}
+		curl_easy_setopt(curl,CURLOPT_HTTPHEADER,req_headers);
+	}
     curlCode = curl_easy_perform(curl);
-    if (curlCode != CURLE_OK) {
+ 	/* Deallocate the headers list if created */
+	if(headers){
+		curl_slist_free_all(req_headers);
+	}
+   if (curlCode != CURLE_OK) {
         ret = EIO;
         fprintf(stderr, "ERROR: preform the URL %s failed, <%d>: %s\n",
                 url, curlCode, curl_easy_strerror(curlCode));
     }
-    
 done:
-    if (chunk != NULL) {
-        curl_slist_free_all(chunk);
-    }
     if (curl != NULL) {
         curl_easy_cleanup(curl);
     }
@@ -417,74 +449,182 @@ done:
     return ret;
 }
 
-int launchMKDIR(const char *url, struct Response **resp)
+static int launchWriteFixedBuffer(const char *url, enum HttpHeader method,
+                       struct RequestHeaders *headers, struct webhdfsBuffer *uploadBuffer,
+                       struct Response **response)
 {
-    return launchCmd(url, PUT, NO, resp);
+    CURLcode curlCode;
+    struct Response* resp = NULL;
+    CURL *curl = NULL;
+    int ret = 0;
+    struct curl_slist *req_headers = NULL;
+	int i = 0;
+    
+    if (!uploadBuffer) {
+        fprintf(stderr, "ERROR: upload buffer is NULL!\n");
+        return EINVAL;
+    }
+    
+    initCurlGlobal();
+    resp = calloc(1, sizeof(struct Response));
+    if (!resp) {
+        return ENOMEM;
+    }
+    ret = initResponseBuffer(&(resp->body));
+    if (ret) {
+        goto done;
+    }
+    ret = initResponseBuffer(&(resp->header));
+    if (ret) {
+        goto done;
+    }
+    
+    // Connect to the datanode in order to create the lease in the namenode
+    curl = curl_easy_init();
+    if (!curl) {
+        fprintf(stderr, "ERROR: failed to initialize the curl handle.\n");
+        return ENOMEM;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, resp->body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, writefunc);
+    curl_easy_setopt(curl, CURLOPT_WRITEHEADER, resp->header);
+   	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, uploadBuffer->wbuffer);
+ 
+    switch(method) {
+        case PUT:
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+            break;
+        case POST:
+            curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
+            break;
+        default:
+            ret = EINVAL;
+            fprintf(stderr, "ERROR: Invalid HTTP method\n");
+            goto done;
+    }
+ 	/* Set custom headers */
+	if(headers){
+		for(i=0; i<headers->length; i++){
+			req_headers = curl_slist_append(req_headers,headers->headers[i]);
+		}
+		curl_easy_setopt(curl,CURLOPT_HTTPHEADER,req_headers);
+	}
+	printf("Started CURL call: %s.\n",url);
+    curlCode = curl_easy_perform(curl);
+ 	/* Deallocate the headers list if created */
+	if(headers){
+		curl_slist_free_all(req_headers);
+	}
+   if (curlCode != CURLE_OK) {
+        ret = EIO;
+        fprintf(stderr, "ERROR: preform the URL %s failed, <%d>: %s\n",
+                url, curlCode, curl_easy_strerror(curlCode));
+    }
+    
+done:
+    if (curl != NULL) {
+        curl_easy_cleanup(curl);
+    }
+    if (ret) {
+        free(resp);
+        resp = NULL;
+    }
+    *response = resp;
+    return ret;
 }
 
-int launchRENAME(const char *url, struct Response **resp)
-{
-    return launchCmd(url, PUT, NO, resp);
+
+void freeRequestHeaders(struct RequestHeaders *headers){
+	int i = 0;
+	if(headers){
+		// free all the headers
+		for(i=0; i<headers->length; i++){
+			free(headers->headers[i]);
+		}
+		// free the structure holding it.
+		free(headers);
+	}
 }
 
-int launchGFS(const char *url, struct Response **resp)
-{
-    return launchCmd(url, GET, NO, resp);
+/**
+ *	Makes a HTTP post call to updat the access token
+ */
+int launchUpdateOAuth(const char* url, struct RequestHeaders *headers, struct webhdfsBuffer *buffer, struct Response **response){
+	// Make the HTTP POST call to refresh the token and update oauth.
+	return launchWriteFixedBuffer(url, POST, headers, buffer, response);
 }
 
-int launchLS(const char *url, struct Response **resp)
+int launchMKDIR(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, GET, NO, resp);
+    return launchCmd(url, PUT, headers, NO, resp);
 }
 
-int launchCHMOD(const char *url, struct Response **resp)
+int launchRENAME(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, PUT, NO, resp);
+    return launchCmd(url, PUT, headers, NO, resp);
 }
 
-int launchCHOWN(const char *url, struct Response **resp)
+int launchGFS(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, PUT, NO, resp);
+    return launchCmd(url, GET, headers, NO, resp);
 }
 
-int launchDELETE(const char *url, struct Response **resp)
+int launchLS(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, DELETE, NO, resp);
+    return launchCmd(url, GET, headers, NO, resp);
 }
 
-int launchOPEN(const char *url, struct Response* resp)
+int launchCHMOD(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchReadInternal(url, resp);
+    return launchCmd(url, PUT, headers, NO, resp);
 }
 
-int launchUTIMES(const char *url, struct Response **resp)
+int launchCHOWN(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, PUT, NO, resp);
+    return launchCmd(url, PUT, headers, NO, resp);
 }
 
-int launchNnWRITE(const char *url, struct Response **resp)
+int launchDELETE(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, PUT, NO, resp);
+    return launchCmd(url, DELETE, headers, NO, resp);
 }
 
-int launchNnAPPEND(const char *url, struct Response **resp)
+int launchOPEN(const char *url, struct RequestHeaders *headers, struct Response* resp)
 {
-    return launchCmd(url, POST, NO, resp);
+    return launchReadInternal(url, headers, resp);
 }
 
-int launchDnWRITE(const char *url, struct webhdfsBuffer *buffer,
+int launchUTIMES(const char *url, struct RequestHeaders *headers, struct Response **resp)
+{
+    return launchCmd(url, PUT, headers, NO, resp);
+}
+
+int launchNnWRITE(const char *url, struct RequestHeaders *headers, struct Response **resp)
+{
+    return launchCmd(url, PUT, headers, NO, resp);
+}
+
+int launchNnAPPEND(const char *url, struct RequestHeaders *headers, struct Response **resp)
+{
+    return launchCmd(url, POST, headers, NO, resp);
+}
+
+int launchDnWRITE(const char *url,struct RequestHeaders *headers, struct webhdfsBuffer *buffer,
                                struct Response **resp)
 {
-    return launchWrite(url, PUT, buffer, resp);
+    return launchWrite(url, PUT, headers, buffer, resp);
 }
 
-int launchDnAPPEND(const char *url, struct webhdfsBuffer *buffer,
+int launchDnAPPEND(const char *url,struct RequestHeaders *headers, struct webhdfsBuffer *buffer,
                                 struct Response **resp)
 {
-    return launchWrite(url, POST, buffer, resp);
+    return launchWrite(url, POST, headers, buffer, resp);
 }
 
-int launchSETREPLICATION(const char *url, struct Response **resp)
+int launchSETREPLICATION(const char *url, struct RequestHeaders *headers, struct Response **resp)
 {
-    return launchCmd(url, PUT, NO, resp);
+    return launchCmd(url, PUT, headers, NO, resp);
 }

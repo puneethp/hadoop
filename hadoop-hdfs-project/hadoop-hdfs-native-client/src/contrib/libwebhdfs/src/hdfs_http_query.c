@@ -32,6 +32,7 @@
  *
  * @param host          NameNode hostName
  * @param nnPort        Port of NameNode
+ * @param useHttps      Use https:// instead of http://
  * @param path          Absolute path for the corresponding file
  * @param op            Operations
  * @param paraNum       Number of remaining parameters
@@ -40,15 +41,15 @@
  * @param url           Holding the created URL
  * @return 0 on success and non-zero value to indicate error
  */
-static int createQueryURL(const char *host, unsigned int nnPort,
-                          const char *path, const char *op, int paraNum,
-                          const char **paraNames, const char **paraValues,
-                          char **queryUrl)
+static int createQueryURL(const char *host, unsigned int nnPort,const bool useHttps,
+						  const char *path, const char *op, int paraNum,
+						  const char **paraNames, const char **paraValues,
+					      char **queryUrl)
 {
     size_t length = 0;
     int i = 0, offset = 0, ret = 0;
     char *url = NULL;
-    const char *protocol = "http://";
+    const char *protocol = useHttps ? "https://" :"http://";
     const char *prefix = "/webhdfs/v1";
     
     if (!paraNames || !paraValues) {
@@ -95,40 +96,41 @@ done:
     return 0;
 }
 
-int createUrlForMKDIR(const char *host, int nnPort,
+int createUrlForMKDIR(const char *host, int nnPort,const bool useHttps,
                       const char *path, const char *user, char **url)
 {
     const char *userPara = "user.name";
-    return createQueryURL(host, nnPort, path, "MKDIRS", 1,
+    return createQueryURL(host, nnPort, useHttps, path, "MKDIRS", 1,
                           &userPara, &user, url);
 }
 
-int createUrlForGetFileStatus(const char *host, int nnPort, const char *path,
-                              const char *user, char **url)
+int createUrlForGetFileStatus(const char *host, int nnPort, const bool useHttps,
+							  const char *path, const char *user, char **url)
 {
     const char *userPara = "user.name";
-    return createQueryURL(host, nnPort, path, "GETFILESTATUS", 1,
+    return createQueryURL(host, nnPort, useHttps, path, "GETFILESTATUS", 1,
                           &userPara, &user, url);
 }
 
-int createUrlForLS(const char *host, int nnPort, const char *path,
-                   const char *user, char **url)
+int createUrlForLS(const char *host, int nnPort, const bool useHttps,
+				   const char *path, const char *user, char **url)
 {
     const char *userPara = "user.name";
-    return createQueryURL(host, nnPort, path, "LISTSTATUS",
+    return createQueryURL(host, nnPort, useHttps, path, "LISTSTATUS",
                           1, &userPara, &user, url);
 }
 
-int createUrlForNnAPPEND(const char *host, int nnPort, const char *path,
-                         const char *user, char **url)
+int createUrlForNnAPPEND(const char *host, int nnPort, const bool useHttps,
+						 const char *path, const char *user, char **url)
 {
     const char *userPara = "user.name";
-    return createQueryURL(host, nnPort, path, "APPEND",
+    return createQueryURL(host, nnPort, useHttps, path, "APPEND",
                           1, &userPara, &user, url);
 }
 
-int createUrlForMKDIRwithMode(const char *host, int nnPort, const char *path,
-                              int mode, const char *user, char **url)
+int createUrlForMKDIRwithMode(const char *host, int nnPort, const bool useHttps,
+							  const char *path, int mode, const char *user,
+							  char **url)
 {
     int strlength;
     char permission[PERM_STR_LEN];
@@ -144,11 +146,11 @@ int createUrlForMKDIRwithMode(const char *host, int nnPort, const char *path,
     paraValues[0] = permission;
     paraValues[1] = user;
     
-    return createQueryURL(host, nnPort, path, "MKDIRS", 2,
+    return createQueryURL(host, nnPort, useHttps, path, "MKDIRS", 2,
                           paraNames, paraValues, url);
 }
 
-int createUrlForRENAME(const char *host, int nnPort, const char *srcpath,
+int createUrlForRENAME(const char *host, int nnPort, const bool useHttps, const char *srcpath,
                          const char *destpath, const char *user, char **url)
 {
     const char *paraNames[2], *paraValues[2];
@@ -157,11 +159,11 @@ int createUrlForRENAME(const char *host, int nnPort, const char *srcpath,
     paraValues[0] = destpath;
     paraValues[1] = user;
     
-    return createQueryURL(host, nnPort, srcpath,
+    return createQueryURL(host, nnPort, useHttps, srcpath,
                           "RENAME", 2, paraNames, paraValues, url);
 }
 
-int createUrlForCHMOD(const char *host, int nnPort, const char *path,
+int createUrlForCHMOD(const char *host, int nnPort, const bool useHttps, const char *path,
                       int mode, const char *user, char **url)
 {
     int strlength;
@@ -178,11 +180,11 @@ int createUrlForCHMOD(const char *host, int nnPort, const char *path,
     paraValues[0] = permission;
     paraValues[1] = user;
     
-    return createQueryURL(host, nnPort, path, "SETPERMISSION",
+    return createQueryURL(host, nnPort, useHttps, path, "SETPERMISSION",
                           2, paraNames, paraValues, url);
 }
 
-int createUrlForDELETE(const char *host, int nnPort, const char *path,
+int createUrlForDELETE(const char *host, int nnPort, const bool useHttps, const char *path,
                        int recursive, const char *user, char **url)
 {
     const char *paraNames[2], *paraValues[2];
@@ -195,11 +197,11 @@ int createUrlForDELETE(const char *host, int nnPort, const char *path,
     }
     paraValues[1] = user;
     
-    return createQueryURL(host, nnPort, path, "DELETE",
+    return createQueryURL(host, nnPort, useHttps, path, "DELETE",
                           2, paraNames, paraValues, url);
 }
 
-int createUrlForCHOWN(const char *host, int nnPort, const char *path,
+int createUrlForCHOWN(const char *host, int nnPort, const bool useHttps, const char *path,
                       const char *owner, const char *group,
                       const char *user, char **url)
 {
@@ -211,11 +213,11 @@ int createUrlForCHOWN(const char *host, int nnPort, const char *path,
     paraValues[1] = group;
     paraValues[2] = user;
     
-    return createQueryURL(host, nnPort, path, "SETOWNER",
+    return createQueryURL(host, nnPort, useHttps, path, "SETOWNER",
                           3, paraNames, paraValues, url);
 }
 
-int createUrlForOPEN(const char *host, int nnPort, const char *path,
+int createUrlForOPEN(const char *host, int nnPort, const bool useHttps, const char *path,
                      const char *user, size_t offset, size_t length, char **url)
 {
     int strlength;
@@ -239,11 +241,11 @@ int createUrlForOPEN(const char *host, int nnPort, const char *path,
     paraValues[1] = lengthStr;
     paraValues[2] = user;
     
-    return createQueryURL(host, nnPort, path, "OPEN",
+    return createQueryURL(host, nnPort, useHttps, path, "OPEN",
                           3, paraNames, paraValues, url);
 }
 
-int createUrlForUTIMES(const char *host, int nnPort, const char *path,
+int createUrlForUTIMES(const char *host, int nnPort, const bool useHttps, const char *path,
                        long unsigned mTime, long unsigned aTime,
                        const char *user, char **url)
 {
@@ -268,11 +270,11 @@ int createUrlForUTIMES(const char *host, int nnPort, const char *path,
     paraValues[1] = acsTime;
     paraValues[2] = user;
     
-    return createQueryURL(host, nnPort, path, "SETTIMES",
+    return createQueryURL(host, nnPort, useHttps, path, "SETTIMES",
                           3, paraNames, paraValues, url);
 }
 
-int createUrlForNnWRITE(const char *host, int nnPort,
+int createUrlForNnWRITE(const char *host, int nnPort, const bool useHttps,
                         const char *path, const char *user,
                         int16_t replication, size_t blockSize, char **url)
 {
@@ -303,11 +305,11 @@ int createUrlForNnWRITE(const char *host, int nnPort,
     paraValues[2] = blockSizeStr;
     paraValues[3] = user;
     
-    return createQueryURL(host, nnPort, path, "CREATE",
+    return createQueryURL(host, nnPort, useHttps, path, "CREATE",
                           4, paraNames, paraValues, url);
 }
 
-int createUrlForSETREPLICATION(const char *host, int nnPort,
+int createUrlForSETREPLICATION(const char *host, int nnPort, const bool useHttps,
                                const char *path, int16_t replication,
                                const char *user, char **url)
 {
@@ -327,11 +329,11 @@ int createUrlForSETREPLICATION(const char *host, int nnPort,
     paraValues[0] = repStr;
     paraValues[1] = user;
     
-    return createQueryURL(host, nnPort, path, "SETREPLICATION",
+    return createQueryURL(host, nnPort, useHttps, path, "SETREPLICATION",
                           2, paraNames, paraValues, url);
 }
 
-int createUrlForGetBlockLocations(const char *host, int nnPort,
+int createUrlForGetBlockLocations(const char *host, int nnPort, const bool useHttps,
                                   const char *path, size_t offset,
                                   size_t length, const char *user, char **url)
 {
@@ -360,11 +362,11 @@ int createUrlForGetBlockLocations(const char *host, int nnPort,
     paraValues[1] = lengthStr;
     paraValues[2] = user;
     
-    return createQueryURL(host, nnPort, path, "GET_BLOCK_LOCATIONS",
+    return createQueryURL(host, nnPort, useHttps, path, "GET_BLOCK_LOCATIONS",
                           3, paraNames, paraValues, url);
 }
 
-int createUrlForReadFromDatanode(const char *dnHost, int dnPort,
+int createUrlForReadFromDatanode(const char *dnHost, int dnPort, const bool useHttps,
                                  const char *path, size_t offset,
                                  size_t length, const char *user,
                                  const char *namenodeRpcAddr, char **url)
@@ -397,6 +399,6 @@ int createUrlForReadFromDatanode(const char *dnHost, int dnPort,
     paraValues[2] = user;
     paraValues[3] = namenodeRpcAddr;
     
-    return createQueryURL(dnHost, dnPort, path, "OPEN",
+    return createQueryURL(dnHost, dnPort, useHttps, path, "OPEN",
                           4, paraNames, paraValues, url);
 }

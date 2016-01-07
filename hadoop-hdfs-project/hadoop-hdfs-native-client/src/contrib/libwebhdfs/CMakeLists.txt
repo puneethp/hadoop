@@ -15,6 +15,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g")
+
 
 find_package(CURL REQUIRED)
 
@@ -39,11 +41,12 @@ hadoop_add_dual_library(webhdfs
     src/hdfs_http_client.c
     src/hdfs_http_query.c
     src/hdfs_json_parser.c
+	src/hdfs_oauth_helper.c
     ../../main/native/libhdfs/exception.c
     ../../main/native/libhdfs/jni_helper.c
+    ../../${OS_DIR}/mutexes.c
+    ../../${OS_DIR}/thread_local_storage.c
     ../../main/native/libhdfs/common/htable.c
-    ${OS_DIR}/mutexes.c
-    ${OS_DIR}/thread_local_storage.c
 )
 hadoop_target_link_dual_libraries(webhdfs
     ${JAVA_JVM_LIBRARY}
@@ -75,6 +78,13 @@ add_executable(test_libwebhdfs_write
     src/test_libwebhdfs_write.c
 )
 target_link_libraries(test_libwebhdfs_write
+    webhdfs
+)
+
+add_executable(test_libswebhdfs_write
+    src/test_libswebhdfs_write.c
+)
+target_link_libraries(test_libswebhdfs_write
     webhdfs
 )
 

@@ -23,6 +23,7 @@
 #include <fcntl.h> /* for O_RDONLY, O_WRONLY */
 #include <stdint.h> /* for uint64_t, etc. */
 #include <time.h> /* for time_t */
+#include <stdbool.h> /* for bool */
 
 /*
  * Support export of DLL symbols during libhdfs build, and import of DLL symbols
@@ -94,6 +95,16 @@ extern  "C" {
     struct hadoopRzOptions;
 
     struct hadoopRzBuffer;
+	
+	struct hdfs_oauth_internal{
+		char *client_id;
+		char *refresh_token;
+		char *access_token;
+		time_t expires_at;
+		char *refresh_url;
+		char *credential;
+	};
+	typedef struct hdfs_oauth_internal* hdfs_oauth;
 
     /**
      * Determine if a file is open for read.
@@ -179,6 +190,16 @@ extern  "C" {
      */
      LIBHDFS_EXTERNAL
      hdfsFS hdfsConnectAsUser(const char* nn, tPort port, const char *user);
+
+	 LIBHDFS_EXTERNAL
+     hdfsFS hdfsConnectWithOAuthAsUser(const char* nn, tPort port, bool useHttps,
+                         hdfs_oauth oauth, const char *user);
+
+	 LIBHDFS_EXTERNAL
+     hdfsFS shdfsConnect(const char* nn, tPort port);
+
+     LIBHDFS_EXTERNAL
+     hdfsFS shdfsConnectWithOAuth(const char* nn, tPort port, hdfs_oauth oauth);
 
     /** 
      * hdfsConnect - Connect to a hdfs file system.

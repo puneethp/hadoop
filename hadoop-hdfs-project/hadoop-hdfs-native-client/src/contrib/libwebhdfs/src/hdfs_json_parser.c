@@ -25,7 +25,7 @@
 #include <ctype.h>
 #include <jansson.h>
 
-static const char * const temporaryRedirectCode = "307 TEMPORARY_REDIRECT";
+static const char * const temporaryRedirectCode = "307";
 static const char * const twoHundredOKCode = "200 OK";
 static const char * const twoHundredOneCreatedCode = "201 Created";
 static const char * const httpHeaderString = "HTTP/1.1";
@@ -300,7 +300,7 @@ static int checkRedirect(const char *header,
         offset++;
     }
     // Looking for "307 TEMPORARY_REDIRECT" in header
-    if (strncmp(header + offset, temporaryRedirectCode,
+    if (strncasecmp(header + offset, temporaryRedirectCode,
                 strlen(temporaryRedirectCode))) {
         // Process possible exception information
         struct jsonException *exc = parseException(content);
@@ -369,6 +369,7 @@ int parseDnLoc(char *content, char **dn)
 {
     char *url = NULL, *dnLocation = NULL, *savepter, *tempContent;
     const char *prefix = "Location: http://";
+    const char *sprefix = "Location: https://";
     const char *prefixToRemove = "Location: ";
     const char *delims = "\r\n";
     
@@ -389,7 +390,7 @@ int parseDnLoc(char *content, char **dn)
     while (isspace(*dnLocation)) {
         dnLocation++;
     }
-    if (strncmp(dnLocation, prefix, strlen(prefix))) {
+    if (!(strncmp(dnLocation, prefix, strlen(prefix)) || strncmp(dnLocation, sprefix, strlen(sprefix)))) {
         return EIO;
     }
     url = strdup(dnLocation + strlen(prefixToRemove));

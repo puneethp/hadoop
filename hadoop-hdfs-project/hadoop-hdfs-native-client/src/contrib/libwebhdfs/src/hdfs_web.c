@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 
 #include "libhdfs/exception.h"
 #include "hdfs/hdfs.h"
@@ -26,6 +27,7 @@
 #include "hdfs_http_query.h"
 #include "hdfs_json_parser.h"
 #include "jni_helper.h"
+#include "hdfs_oauth_helper.h"
 
 #define HADOOP_HDFS_CONF       "org/apache/hadoop/hdfs/HdfsConfiguration"
 #define HADOOP_NAMENODE        "org/apache/hadoop/hdfs/server/namenode/NameNode"
@@ -37,6 +39,8 @@ struct hdfsBuilder {
     tPort port;
     const char *kerbTicketCachePath;
     const char *userName;
+    hdfs_oauth oauth;
+	bool useHttps;
 };
 
 /**
@@ -51,6 +55,8 @@ struct hdfs_internal {
     char *nn;
     tPort port;
     char *userName;
+    hdfs_oauth oauth;
+	bool useHttps;
 
     /**
      * Working directory -- stored with a trailing slash.
@@ -67,6 +73,45 @@ struct hdfsFile_internal {
     int flags;                  /* Flag indicate read/create/append etc. */
     tOffset offset;             /* Current offset position in the file */
 };
+
+/**
+ * Duplicate hdfs_oauth and return hdfs_oauth
+ */
+hdfs_oauth hdfs_oauth_dup(hdfs_oauth oauth){
+	hdfs_oauth new_oauth = NULL;
+	if(oauth){
+		new_oauth = (hdfs_oauth)calloc(1,sizeof(struct hdfs_oauth_internal));
+		new_oauth->client_id = oauth->client_id ? strdup(oauth->client_id) :  NULL;
+		new_oauth->refresh_token = oauth->refresh_token? strdup(oauth->refresh_token) : NULL;
+		new_oauth->access_token = oauth->access_token ? strdup(oauth->access_token) : NULL;
+		new_oauth->refresh_url = oauth->refresh_url ? strdup(oauth->refresh_url) : NULL;
+		new_oauth->credential = oauth->credential ? strdup(oauth->credential) : NULL;
+		new_oauth->expires_at = oauth->expires_at;
+	}
+	return new_oauth;
+}
+
+/**
+ * Free hdfs_oauth
+ */
+void freeHdfsOAuth(struct hdfs_oauth_internal *oauth){
+	if(oauth){
+		// Free the contents of the hdfs_oauth.
+		if(oauth->client_id)
+			free(oauth->client_id);
+		if(oauth->refresh_token)
+			free(oauth->refresh_token);
+		if(oauth->access_token)
+			free(oauth->access_token);
+		if(oauth->refresh_url)
+			free(oauth->refresh_url);
+		if(oauth->credential)
+			free(oauth->credential);
+		
+		// free the structure
+		free(oauth);
+	}
+}
 
 /**
  * Create, initialize and return a webhdfsBuffer
@@ -222,6 +267,7 @@ static void freeWebHdfsInternal(struct hdfs_internal *fs)
         free(fs->nn);
         free(fs->userName);
         free(fs->workingDir);
+		freeHdfsOAuth(fs->oauth);
     }
 }
 
@@ -274,7 +320,22 @@ void hdfsBuilderSetKerbTicketCachePath(struct hdfsBuilder *bld,
     }
 }
 
-hdfsFS hdfsConnectAsUser(const char* nn, tPort port, const char *user)
+void hdfsBuilderSetOAuth(struct hdfsBuilder *bld,
+                              struct hdfs_oauth_internal* oauth){
+   if(bld){
+       bld->oauth = oauth;
+   }
+}
+
+void hdfsBuilderSetUseHttps(struct hdfsBuilder *bld,
+								bool useHttps){
+	if(bld){
+		bld->useHttps = useHttps;
+	}
+}
+
+hdfsFS hdfsConnectWithOAuthAsUser(const char* nn, tPort port, bool useHttps,
+                         hdfs_oauth oauth, const char *user)
 {
     struct hdfsBuilder* bld = hdfsNewBuilder();
     if (!bld) {
@@ -283,12 +344,33 @@ hdfsFS hdfsConnectAsUser(const char* nn, tPort port, const char *user)
     hdfsBuilderSetNameNode(bld, nn);
     hdfsBuilderSetNameNodePort(bld, port);
     hdfsBuilderSetUserName(bld, user);
+	hdfsBuilderSetUseHttps(bld, useHttps);
+	hdfsBuilderSetOAuth(bld, oauth);
     return hdfsBuilderConnect(bld);
+}
+
+hdfsFS hdfsConnectAsUser(const char* nn, tPort port, const char *user)
+{
+    return hdfsConnectWithOAuthAsUser(nn, port, false, NULL, user);
+}
+
+hdfsFS hdfsConnectWithOAuth(const char* nn, tPort port, hdfs_oauth oauth){
+	return hdfsConnectWithOAuthAsUser(nn, port, false, oauth, NULL);
 }
 
 hdfsFS hdfsConnect(const char* nn, tPort port)
 {
     return hdfsConnectAsUser(nn, port, NULL);
+}
+
+hdfsFS shdfsConnect(const char* nn, tPort port)
+{
+    return hdfsConnectWithOAuthAsUser(nn, port, true, NULL, NULL);
+}
+
+hdfsFS shdfsConnectWithOAuth(const char* nn, tPort port, hdfs_oauth oauth)
+{
+    return hdfsConnectWithOAuthAsUser(nn, port, true, oauth, NULL);
 }
 
 hdfsFS hdfsConnectNewInstance(const char* nn, tPort port)
@@ -432,14 +514,27 @@ hdfsFS hdfsBuilderConnect(struct hdfsBuilder *bld)
             goto done;
         }
     }
+	fs->useHttps = bld->useHttps;
+	if(bld->oauth){
+		
+		if(!bld->oauth->refresh_url){
+			ret = ENOMEM;
+			goto done;
+		}
+		
+		if(!bld->oauth->refresh_token){
+			ret = ENOMEM;
+			goto done;
+		}
+
+		fs->oauth = hdfs_oauth_dup(bld->oauth);
+	}
     // The working directory starts out as root.
     fs->workingDir = strdup("/");
     if (!fs->workingDir) {
         ret = ENOMEM;
         goto done;
     }
-    // For debug
-    fprintf(stderr, "namenode: %s:%d\n", bld->nn, bld->port);
 
 done:
     free(bld);
@@ -459,6 +554,41 @@ int hdfsDisconnect(hdfsFS fs)
     }
     freeWebHdfsInternal(fs);
     return 0;
+}
+
+/**
+ * Update OAuth access token using refresh url and refresh token.
+ * this is an OAuth standard to send a post request with these post parameters
+ * client_id , grant_type, resource, 
+ */
+
+
+static struct RequestHeaders* getHeaders(struct hdfs_oauth_internal *oauth, bool isChunked){
+	time_t now = time(NULL);
+	struct RequestHeaders* headers = NULL;
+	char *bearer_token;
+	const char *token_type = "Bearer";
+	const char *authorization_header = "Authorization";
+	int ret = 0;
+	if(oauth){
+		headers = (struct RequestHeaders *)calloc(1,sizeof(struct RequestHeaders));
+		// Check if current token has expired, if it has call oauth refresh url.
+		printf("Compare %d to %d", now, oauth->expires_at);
+		if((now + 5) > oauth->expires_at){
+			ret = update_oauth_token(oauth);
+			assert(!ret);
+		}
+		// Create a list and add BEARER token type.
+		bearer_token = (char *)calloc(1,sizeof(char) * (strlen(token_type) + strlen(authorization_header) + 4 + strlen(oauth->access_token)));
+		headers->headers = (char**)calloc(1, sizeof(char*) * 2);
+		
+		sprintf(bearer_token, "%s: %s %s", authorization_header, token_type, oauth->access_token);
+		
+		headers->headers[0] = bearer_token;
+		headers->headers[1] = strdup(isChunked ? "Transfer-Encoding: chunked" : "Content-Length:0");
+		headers->length = 2;
+	}
+	return headers;
 }
 
 /**
@@ -503,6 +633,7 @@ static int getAbsolutePath(hdfsFS fs, const char *path, char **absPath)
 int hdfsCreateDirectory(hdfsFS fs, const char* path)
 {
     char *url = NULL, *absPath = NULL;
+	struct RequestHeaders* headers = NULL;
     struct Response *resp = NULL;
     int ret = 0;
 
@@ -514,11 +645,14 @@ int hdfsCreateDirectory(hdfsFS fs, const char* path)
     if (ret) {
         goto done;
     }
-    ret = createUrlForMKDIR(fs->nn, fs->port, absPath, fs->userName, &url);
+    ret = createUrlForMKDIR(fs->nn, fs->port, fs->useHttps, absPath, fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchMKDIR(url, &resp);
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+
+    ret = launchMKDIR(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -527,6 +661,7 @@ done:
     freeResponse(resp);
     free(url);
     free(absPath);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -539,6 +674,7 @@ int hdfsChmod(hdfsFS fs, const char* path, short mode)
     char *absPath = NULL, *url = NULL;
     struct Response *resp = NULL;
     int ret = 0;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
@@ -548,12 +684,14 @@ int hdfsChmod(hdfsFS fs, const char* path, short mode)
     if (ret) {
         goto done;
     }
-    ret = createUrlForCHMOD(fs->nn, fs->port, absPath, (int) mode,
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = createUrlForCHMOD(fs->nn, fs->port, fs->useHttps, absPath, (int) mode,
                             fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchCHMOD(url, &resp);
+    ret = launchCHMOD(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -562,6 +700,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -574,6 +713,7 @@ int hdfsChown(hdfsFS fs, const char* path, const char *owner, const char *group)
     int ret = 0;
     char *absPath = NULL, *url = NULL;
     struct Response *resp = NULL;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
@@ -584,12 +724,14 @@ int hdfsChown(hdfsFS fs, const char* path, const char *owner, const char *group)
     if (ret) {
         goto done;
     }
-    ret = createUrlForCHOWN(fs->nn, fs->port, absPath,
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = createUrlForCHOWN(fs->nn, fs->port, fs->useHttps, absPath,
                             owner, group, fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchCHOWN(url, &resp);
+    ret = launchCHOWN(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -598,6 +740,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -610,6 +753,7 @@ int hdfsRename(hdfsFS fs, const char* oldPath, const char* newPath)
     char *oldAbsPath = NULL, *newAbsPath = NULL, *url = NULL;
     int ret = 0;
     struct Response *resp = NULL;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || oldPath == NULL || newPath == NULL) {
         ret = EINVAL;
@@ -623,12 +767,14 @@ int hdfsRename(hdfsFS fs, const char* oldPath, const char* newPath)
     if (ret) {
         goto done;
     }
-    ret = createUrlForRENAME(fs->nn, fs->port, oldAbsPath,
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = createUrlForRENAME(fs->nn, fs->port, fs->useHttps, oldAbsPath,
                              newAbsPath, fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchRENAME(url, &resp);
+    ret = launchRENAME(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -638,6 +784,7 @@ done:
     free(oldAbsPath);
     free(newAbsPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -663,6 +810,7 @@ static hdfsFileInfo *hdfsGetPathInfoImpl(hdfsFS fs, const char* path,
     struct Response *resp = NULL;
     int ret = 0;
     hdfsFileInfo *fileInfo = NULL;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
@@ -679,12 +827,14 @@ static hdfsFileInfo *hdfsGetPathInfoImpl(hdfsFS fs, const char* path,
     }
     fileInfo->mKind = kObjectKindFile;
 
-    ret = createUrlForGetFileStatus(fs->nn, fs->port, absPath,
+    ret = createUrlForGetFileStatus(fs->nn, fs->port, fs->useHttps, absPath,
                                     fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchGFS(url, &resp);
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = launchGFS(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -694,6 +844,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret == 0) {
         return fileInfo;
     } else {
@@ -714,6 +865,7 @@ hdfsFileInfo *hdfsListDirectory(hdfsFS fs, const char* path, int *numEntries)
     struct Response *resp = NULL;
     int ret = 0;
     hdfsFileInfo *fileInfo = NULL;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
@@ -729,11 +881,13 @@ hdfsFileInfo *hdfsListDirectory(hdfsFS fs, const char* path, int *numEntries)
         goto done;
     }
     
-    ret = createUrlForLS(fs->nn, fs->port, absPath, fs->userName, &url);
+    ret = createUrlForLS(fs->nn, fs->port, fs->useHttps, absPath, fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchLS(url, &resp);
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = launchLS(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -743,6 +897,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret == 0) {
         return fileInfo;
     } else {
@@ -756,6 +911,7 @@ int hdfsSetReplication(hdfsFS fs, const char* path, int16_t replication)
     char *url = NULL, *absPath = NULL;
     struct Response *resp = NULL;
     int ret = 0;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
@@ -766,12 +922,14 @@ int hdfsSetReplication(hdfsFS fs, const char* path, int16_t replication)
         goto done;
     }
 
-    ret = createUrlForSETREPLICATION(fs->nn, fs->port, absPath,
+    ret = createUrlForSETREPLICATION(fs->nn, fs->port, fs->useHttps, absPath,
                                      replication, fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchSETREPLICATION(url, &resp);
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = launchSETREPLICATION(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -780,6 +938,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -803,6 +962,7 @@ int hdfsDelete(hdfsFS fs, const char* path, int recursive)
     char *url = NULL, *absPath = NULL;
     struct Response *resp = NULL;
     int ret = 0;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
@@ -813,12 +973,14 @@ int hdfsDelete(hdfsFS fs, const char* path, int recursive)
         goto done;
     }
     
-    ret = createUrlForDELETE(fs->nn, fs->port, absPath,
+    ret = createUrlForDELETE(fs->nn, fs->port, fs->useHttps, absPath,
                              recursive, fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchDELETE(url, &resp);
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = launchDELETE(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -827,6 +989,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -839,22 +1002,25 @@ int hdfsUtime(hdfsFS fs, const char* path, tTime mtime, tTime atime)
     char *url = NULL, *absPath = NULL;
     struct Response *resp = NULL;
     int ret = 0;
+	struct RequestHeaders *headers = NULL;
 
     if (fs == NULL || path == NULL) {
         ret = EINVAL;
         goto done;
     }
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
     ret = getAbsolutePath(fs, path, &absPath);
     if (ret) {
         goto done;
     }
    
-    ret = createUrlForUTIMES(fs->nn, fs->port, absPath, mtime, atime,
+    ret = createUrlForUTIMES(fs->nn, fs->port, fs->useHttps, absPath, mtime, atime,
                              fs->userName, &url);
     if (ret) {
         goto done;
     }
-    ret = launchUTIMES(url, &resp);
+    ret = launchUTIMES(url, headers, &resp);
     if (ret) {
         goto done;
     }
@@ -863,6 +1029,7 @@ done:
     freeResponse(resp);
     free(absPath);
     free(url);
+	freeRequestHeaders(headers);
     if (ret) {
         errno = ret;
         return -1;
@@ -889,6 +1056,7 @@ typedef struct {
     struct webhdfsBuffer *uploadBuffer; /* buffer storing data to write */
     int flags;          /* flag indicating writing mode: create or append */
     struct Response *resp;      /* response from the target datanode */
+	struct hdfs_oauth_internal *oauth;
 } threadData;
 
 /**
@@ -905,6 +1073,9 @@ static void freeThreadData(threadData *data)
         if (data->resp) {
             freeResponse(data->resp);
         }
+		if(data->oauth){
+			freeHdfsOAuth(data->oauth);
+		}
         // The uploadBuffer would be freed by freeWebFileHandle()
         free(data);
         data = NULL;
@@ -920,11 +1091,16 @@ static void *writeThreadOperation(void *v)
 {
     int ret = 0;
     threadData *data = v;
+	struct RequestHeaders *headers = NULL;
+
+	headers = getHeaders(data->oauth, true);
     if (data->flags & O_APPEND) {
-        ret = launchDnAPPEND(data->url, data->uploadBuffer, &(data->resp));
+        ret = launchDnAPPEND(data->url, headers, data->uploadBuffer, &(data->resp));
     } else {
-        ret = launchDnWRITE(data->url, data->uploadBuffer, &(data->resp));
+        ret = launchDnWRITE(data->url, headers, data->uploadBuffer, &(data->resp));
     }
+	
+	freeRequestHeaders(headers);
     if (ret) {
         fprintf(stderr, "Failed to write to datanode %s, <%d>: %s.\n",
                 data->url, ret, hdfs_strerror(ret));
@@ -964,19 +1140,24 @@ static int hdfsOpenOutputFileImpl(hdfsFS fs, hdfsFile file)
     int append, ret = 0;
     char *nnUrl = NULL, *dnUrl = NULL;
     threadData *data = NULL;
+	struct RequestHeaders* headers = NULL;
+
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
 
     ret = initWebHdfsBuffer(&webhandle->uploadBuffer);
     if (ret) {
         goto done;
     }
     append = file->flags & O_APPEND;
+
     if (!append) {
         // If we're not appending, send a create request to the NN
-        ret = createUrlForNnWRITE(fs->nn, fs->port, webhandle->absPath,
+        ret = createUrlForNnWRITE(fs->nn, fs->port, fs->useHttps, webhandle->absPath,
                                   fs->userName, webhandle->replication,
                                   webhandle->blockSize, &nnUrl);
     } else {
-        ret = createUrlForNnAPPEND(fs->nn, fs->port, webhandle->absPath,
+        ret = createUrlForNnAPPEND(fs->nn, fs->port, fs->useHttps, webhandle->absPath,
                                    fs->userName, &nnUrl);
     }
     if (ret) {
@@ -986,9 +1167,9 @@ static int hdfsOpenOutputFileImpl(hdfsFS fs, hdfsFile file)
         goto done;
     }
     if (!append) {
-        ret = launchNnWRITE(nnUrl, &resp);
+        ret = launchNnWRITE(nnUrl, headers, &resp);
     } else {
-        ret = launchNnAPPEND(nnUrl, &resp);
+        ret = launchNnAPPEND(nnUrl, headers, &resp);
     }
     if (ret) {
         fprintf(stderr, "fail to get the response from namenode for "
@@ -1001,6 +1182,8 @@ static int hdfsOpenOutputFileImpl(hdfsFS fs, hdfsFile file)
     } else {
         ret = parseNnAPPEND(resp->header->content, resp->body->content);
     }
+	fprintf(stderr,"%s\n",resp->header->content);
+	fprintf(stderr,"%s\n",resp->body->content);
     if (ret) {
         fprintf(stderr, "fail to parse the response from namenode for "
                 "file creation/appending, <%d>: %s.\n",
@@ -1033,6 +1216,7 @@ static int hdfsOpenOutputFileImpl(hdfsFS fs, hdfsFile file)
     }
     data->flags = file->flags;
     data->uploadBuffer = webhandle->uploadBuffer;
+	data->oauth = hdfs_oauth_dup(fs->oauth);
     ret = pthread_create(&webhandle->connThread, NULL,
                          writeThreadOperation, data);
     if (ret) {
@@ -1232,6 +1416,7 @@ static int hdfsReadImpl(hdfsFS fs, hdfsFile file, void* buffer, tSize off,
     int ret = 0;
     char *url = NULL;
     struct Response *resp = NULL;
+	struct RequestHeaders* headers = NULL;
 
     if (fs == NULL || file == NULL || file->type != INPUT || buffer == NULL ||
             length < 0) {
@@ -1261,12 +1446,14 @@ static int hdfsReadImpl(hdfsFS fs, hdfsFile file, void* buffer, tSize off,
     resp->body->content = buffer;
     resp->body->remaining = length;
     
-    ret = createUrlForOPEN(fs->nn, fs->port, file->file->absPath,
+    ret = createUrlForOPEN(fs->nn, fs->port, fs->useHttps, file->file->absPath,
                            fs->userName, off, length, &url);
     if (ret) {
         goto done;
     }
-    ret = launchOPEN(url, resp);
+	// Get headers needed.
+	headers = getHeaders(fs->oauth, false);
+    ret = launchOPEN(url, headers, resp);
     if (ret) {
         goto done;
     }
@@ -1286,6 +1473,7 @@ done:
     }
     free(resp);
     free(url);
+	freeRequestHeaders(headers);
     return ret;
 }
 

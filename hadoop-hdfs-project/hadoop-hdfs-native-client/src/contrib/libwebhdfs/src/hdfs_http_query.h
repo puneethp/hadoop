@@ -22,7 +22,7 @@
 
 #include <unistd.h> /* for size_t */
 #include <inttypes.h> /* for int16_t */
-
+#include <stdbool.h> /* for bool */
 /**
  * Create the URL for a MKDIR request
  *
@@ -33,7 +33,7 @@
  * @param url Holding the generated URL for MKDIR request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForMKDIR(const char *host, int nnPort,
+int createUrlForMKDIR(const char *host, int nnPort, bool useHttps,
                       const char *path, const char *user,
                       char **url) __attribute__ ((warn_unused_result));
 
@@ -48,7 +48,7 @@ int createUrlForMKDIR(const char *host, int nnPort,
  * @param url Holding the generated URL for MKDIR request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForMKDIRwithMode(const char *host, int nnPort, const char *path,
+int createUrlForMKDIRwithMode(const char *host, int nnPort, bool useHttps, const char *path,
                               int mode, const char *user,
                               char **url) __attribute__ ((warn_unused_result));
 
@@ -63,7 +63,7 @@ int createUrlForMKDIRwithMode(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for RENAME request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForRENAME(const char *host, int nnPort, const char *srcpath,
+int createUrlForRENAME(const char *host, int nnPort, bool useHttps, const char *srcpath,
                        const char *dstpath, const char *user,
                        char **url) __attribute__ ((warn_unused_result));
 
@@ -78,7 +78,7 @@ int createUrlForRENAME(const char *host, int nnPort, const char *srcpath,
  * @param url Holding the generated URL for CHMOD request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForCHMOD(const char *host, int nnPort, const char *path,
+int createUrlForCHMOD(const char *host, int nnPort, bool useHttps, const char *path,
                       int mode, const char *user,
                       char **url) __attribute__ ((warn_unused_result));
 
@@ -92,7 +92,7 @@ int createUrlForCHMOD(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for GETFILESTATUS request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForGetFileStatus(const char *host, int nnPort,
+int createUrlForGetFileStatus(const char *host, int nnPort, bool useHttps,
                               const char *path, const char *user,
                               char **url) __attribute__ ((warn_unused_result));
 
@@ -106,7 +106,7 @@ int createUrlForGetFileStatus(const char *host, int nnPort,
  * @param url Holding the generated URL for LISTSTATUS request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForLS(const char *host, int nnPort,
+int createUrlForLS(const char *host, int nnPort, bool useHttps,
                    const char *path, const char *user,
                    char **url) __attribute__ ((warn_unused_result));
 
@@ -121,7 +121,7 @@ int createUrlForLS(const char *host, int nnPort,
  * @param url Holding the generated URL for DELETE request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForDELETE(const char *host, int nnPort, const char *path,
+int createUrlForDELETE(const char *host, int nnPort, bool useHttps, const char *path,
                        int recursive, const char *user,
                        char **url) __attribute__ ((warn_unused_result));
 
@@ -137,7 +137,7 @@ int createUrlForDELETE(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for CHOWN request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForCHOWN(const char *host, int nnPort, const char *path,
+int createUrlForCHOWN(const char *host, int nnPort, bool useHttps, const char *path,
                       const char *owner, const char *group, const char *user,
                       char **url) __attribute__ ((warn_unused_result));
 
@@ -153,7 +153,7 @@ int createUrlForCHOWN(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for OPEN/READ request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForOPEN(const char *host, int nnPort, const char *path,
+int createUrlForOPEN(const char *host, int nnPort, bool useHttps, const char *path,
                      const char *user, size_t offset, size_t length,
                      char **url) __attribute__ ((warn_unused_result));
 
@@ -169,7 +169,7 @@ int createUrlForOPEN(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for UTIMES request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForUTIMES(const char *host, int nnPort, const char *path,
+int createUrlForUTIMES(const char *host, int nnPort, bool useHttps, const char *path,
                        long unsigned mTime, long unsigned aTime,
                        const char *user,
                        char **url) __attribute__ ((warn_unused_result));
@@ -186,7 +186,7 @@ int createUrlForUTIMES(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for WRITE request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForNnWRITE(const char *host, int nnPort, const char *path,
+int createUrlForNnWRITE(const char *host, int nnPort, bool useHttps, const char *path,
                         const char *user, int16_t replication, size_t blockSize,
                         char **url) __attribute__ ((warn_unused_result));
 
@@ -200,7 +200,7 @@ int createUrlForNnWRITE(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for APPEND request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForNnAPPEND(const char *host, int nnPort,
+int createUrlForNnAPPEND(const char *host, int nnPort, bool useHttps,
                          const char *path, const char *user,
                          char **url) __attribute__ ((warn_unused_result));
 
@@ -215,7 +215,7 @@ int createUrlForNnAPPEND(const char *host, int nnPort,
  * @param url Holding the generated URL for SETREPLICATION request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForSETREPLICATION(const char *host, int nnPort, const char *path,
+int createUrlForSETREPLICATION(const char *host, int nnPort, bool useHttps, const char *path,
                                int16_t replication, const char *user,
                                char **url) __attribute__ ((warn_unused_result));
 
@@ -231,7 +231,7 @@ int createUrlForSETREPLICATION(const char *host, int nnPort, const char *path,
  * @param url Holding the generated URL for GET_BLOCK_LOCATIONS request
  * @return 0 on success and non-zero value on errors
  */
-int createUrlForGetBlockLocations(const char *host, int nnPort,
+int createUrlForGetBlockLocations(const char *host, int nnPort, bool useHttps,
                             const char *path, size_t offset,
                             size_t length, const char *user,
                             char **url) __attribute__ ((warn_unused_result));
